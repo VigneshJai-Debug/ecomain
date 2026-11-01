@@ -1,0 +1,8 @@
+﻿"region","algorithm","seeds","mean_co2e_g","mean_saving_vs_paired_fcfs_pct","mean_completed_jobs","mean_co2e_per_completed_job_g","mean_deadline_violations","mean_deadline_violations_over_60s"
+"INDIA","FCFS","3","14365.395","0","60","239.423","10.333","7.333"
+"INDIA","Wiesner_2021_AdHoc","3","13695.912","4.669","60","228.265","40.333","37"
+"INDIA","Bahreini_SRR_APX","3","12615.738","12.164","56.333","224.002","25","0"
+"INDIA","Deadline_Carbon_Shift","3","13713.541","4.53","60","228.559","45.667","22"
+"INDIA","CADS_theta0","3","13742.5","4.323","60","229.042","37.667","13.667"
+"INDIA","CADS_theta5","3","13766.448","4.156","60","229.441","34","13.333"
+"INDIA","CADS_theta10","3","13843.851","3.623","60","230.731","26.667","11.667"

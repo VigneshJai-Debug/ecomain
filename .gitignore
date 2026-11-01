@@ -1,0 +1,41 @@
+.env
+.venv/
+# Java / Maven build
+target/
+bin/
+*.class
+
+# Generated classpath
+cp.txt
+
+# IDE files
+.vscode/
+.idea/
+
+# Logs
+*.log
+*_run.txt
+*_run.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Backup / temporary source files
+*_backup.java
+*.bak
+*.tmp
+
+# Raw Indian generation data
+All_India_Generation_*.csv
+Baseline_Carbon_Dioxide_Emission_Database_Version_22.0.xlsx
+india_generation_and_carbon_hourly_PRELIMINARY.csv
+EcoCloudCarbonExperiment_fcfs.java
+india_carbon_FINAL_CEA_v22_methodology.csv
+india_carbon_FINAL_CEA_v22_summary.csv
+
+# LaTeX build outputs
+*.aux
+*.bbl
+*.blg
+*.out

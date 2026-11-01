@@ -1,0 +1,8 @@
+﻿"region","algorithm","seeds","mean_co2e_g","mean_saving_vs_paired_fcfs_pct","mean_completed_jobs","mean_co2e_per_completed_job_g","mean_deadline_violations","mean_deadline_violations_over_60s"
+"GB","FCFS","3","4813.705","0","60","80.228","10.333","7.333"
+"GB","Wiesner_2021_AdHoc","3","4378.055","9.085","60","72.968","40.667","37.333"
+"GB","Bahreini_SRR_APX","3","4221.448","12.273","57.333","73.64","28.667","0"
+"GB","Deadline_Carbon_Shift","3","4274.363","11.195","60","71.239","52","20.667"
+"GB","CADS_theta0","3","4268.941","11.325","60","71.149","49","8.667"
+"GB","CADS_theta5","3","4348.64","9.644","60","72.477","35","5.333"
+"GB","CADS_theta10","3","4449.368","7.541","60","74.156","26","3.333"

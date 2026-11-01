@@ -1,0 +1,4 @@
+seed,total_variables,positive_support_variables,strictly_fractional_variables,jobs_total,jobs_single_candidate,pct_jobs_single_candidate,jobs_multi_candidate,jobs_multi_identical_ci,jobs_spatial_split_only,jobs_temporal_split_only,jobs_both_split,lp_mass_site_0,lp_mass_site_1
+20260320,1500,86,45,60,41,68.33,19,5,5,4,10,28.7229,31.2771
+20260321,1542,91,50,60,41,68.33,19,3,2,9,8,33.6281,26.3719
+20260322,1568,95,56,60,39,65.00,21,5,4,4,13,25.7113,34.2887

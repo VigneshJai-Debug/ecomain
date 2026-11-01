@@ -1,0 +1,26 @@
+{
+    "horizon_slots":  48,
+    "jobs_per_seed":  60,
+    "slack_range":  12,
+    "start_days":  "fixed",
+    "information_mode":  "oracle",
+    "experiment":  "matched_60job",
+    "india_trace":  "data/india/india_carbon_hourly_utc_aligned.csv",
+    "gb_trace":  "data/uk/uk_carbon_hourly_clean.csv",
+    "cads_thetas":  [
+                        0,
+                        0.05,
+                        0.1
+                    ],
+    "seeds":  [
+                  "20260320",
+                  "20260321",
+                  "20260322"
+              ],
+    "release_slots":  8,
+    "regions":  [
+                    "INDIA",
+                    "GB"
+                ],
+    "note":  "Generated fresh by scripts/ecocloud.ps1; 60 jobs per run."
+}

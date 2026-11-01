@@ -1,0 +1,866 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{url}
+\usepackage{microtype}
+
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+
+\begin{document}
+
+\title{Evaluating the Transferability of Carbon-Aware Cloud Scheduling\\
+Across Electricity Grids: A Time-Aware Study of\\
+Great Britain and India}
+
+\author{
+    \IEEEauthorblockN{Vignesh Jaisankar, Kopathy K}
+    \IEEEauthorblockA{
+        School of Computer Science and Engineering (SCOPE)\\
+        Vellore Institute of Technology, Chennai, India
+    }
+}
+
+\maketitle
+
+\begin{abstract}
+Carbon-aware cloud scheduling reduces operational emissions by aligning batch
+workload execution with periods of lower grid carbon intensity. Most published
+evaluations assess scheduling policies within a single electricity grid,
+leaving open whether reported gains transfer across grids with different
+generation mixes and diurnal patterns. This paper presents a controlled,
+time-aware comparative evaluation of seven scheduling policies across two
+national grids: Great Britain~(GB) and India. Indian source timestamps,
+recorded in Indian Standard Time~(IST, UTC+05:30), are explicitly converted to
+UTC and resampled onto a common hourly timeline before any cross-region
+comparison, removing a potential 5.5-hour alignment error present in earlier
+versions of this work. Using a five-fold temporal cross-validation scheme with
+four workload seeds per fold, we evaluate the Bahreini SRR-APX scheduler,
+three Carbon-Adaptive Deadline-Sensitive~(CADS) configurations, a
+deadline-bounded carbon-shifting policy, the Wiesner~2021 Ad-Hoc policy, and a
+first-come first-served~(FCFS) baseline. For SRR-APX, mean carbon savings
+relative to FCFS were 6.04\% in GB (95\%~CI: 2.66\%--9.41\%) and 6.16\% in
+India (95\%~CI: 4.93\%--7.38\%), a difference of 0.12 percentage points, with
+India marginally higher. SRR-APX achieves zero material deadline misses in both
+regions while admitting approximately 93--95\% of the sixty submitted jobs. The
+India policy comparison reveals a pronounced tension between carbon savings and
+service quality: the Wiesner~2021 Ad-Hoc policy achieves 5.78\% savings but
+incurs 35.30 material misses per run on average, against zero for SRR-APX. A
+separate three-seed forecast-guided investigation yields a small descriptive
+improvement of 0.42 percentage points, though the limited seed count and
+identical outcomes across forecast and oracle variants preclude strong
+conclusions. The findings underscore that regional performance must be measured
+rather than assumed, and that maximising carbon savings in isolation can
+materially degrade service quality.
+\end{abstract}
+
+\begin{IEEEkeywords}
+carbon-aware scheduling, cloud computing, electricity carbon intensity,
+deadline-constrained scheduling, green computing, temporal workload shifting,
+IST--UTC alignment
+\end{IEEEkeywords}
+
+%--------------------------------------------------------------
+\section{Introduction}
+\label{sec:intro}
+%--------------------------------------------------------------
+
+Data centres account for a substantial share of global electricity
+consumption, with recent estimates placing them at approximately 200--250~TWh
+per year and growing \cite{masanet2020recalibrating,iea2022datacenters}. The
+carbon intensity of grid electricity, measured in grams of
+CO\textsubscript{2}~equivalent per kilowatt-hour~(gCO\textsubscript{2}e/kWh),
+varies significantly across hours of the day and across national grids,
+depending on the prevailing generation mix and dispatch order
+\cite{radovanovic2023,siler2012should}. Carbon-aware scheduling exploits this
+variability by deferring flexible workloads to periods when the grid is
+comparatively clean, reducing emissions without altering computation outcomes
+\cite{radovanovic2023,acun2023}.
+
+Prior work has demonstrated that temporal workload shifting can yield
+measurable carbon savings in specific regions
+\cite{wiesner2021,hanafy2024gaia,bahreini2023dispatcher}. A recurring
+methodological limitation, however, is that evaluations are typically conducted
+within a single grid or a narrow set of North American or Western European
+contexts \cite{frachtenberg2023limitations}. Electricity grids differ
+substantially in their generation mix, diurnal patterns, and seasonal
+characteristics. India's grid remains heavily coal-dependent at the national
+level, with renewable penetration growing but not yet dominating the daily
+carbon curve \cite{cea2024,ceai2023general}. Great Britain's grid has a
+proportionally larger share of wind and nuclear, producing more pronounced
+intra-day carbon variability \cite{neso2024api}. The assumption that a
+scheduler performing well in one region will transfer its gains to another is
+therefore not self-evident and deserves direct empirical examination.
+
+A second methodological concern specific to multi-region studies is temporal
+alignment. Indian electricity authority data is published in Indian Standard
+Time~(IST, UTC+05:30). If source timestamps are ingested without timezone
+conversion, workload events recorded in UTC are paired with carbon-intensity
+observations that are 5 hours and 30 minutes misaligned. Earlier iterations
+of this work identified this risk; the corrected pipeline described here
+explicitly interprets India source timestamps as IST, converts them to UTC, and
+resamples observations onto a common hourly timeline. Residual provenance
+uncertainty is acknowledged in Section~\ref{sec:threats}.
+
+Service quality must be evaluated alongside carbon savings. Carbon-aware
+scheduling commonly introduces waiting time: workloads are deferred to cleaner
+windows, extending the gap between submission and completion. For jobs with
+explicit deadlines, this creates the risk of material violations. Some prior
+analyses report savings figures without adequately distinguishing policies that
+achieve them at modest service cost from those that impose heavy deadline
+penalties \cite{hanafy2024gaia,bahreini2022approx}. A policy achieving 9\%
+savings but missing deadlines on one-third of runs is not equivalent, in
+deployment terms, to one achieving 6\% savings with zero material misses.
+
+This paper addresses these gaps through two experimental investigations.
+Experiment~A is a controlled, time-aware comparative evaluation of seven
+scheduling policies across GB and India. Experiment~B is a separate,
+exploratory investigation of forecast-guided variants of the Bahreini SRR-APX
+scheduler using India carbon-intensity data. The two experiments use distinct
+workload configurations and evaluation protocols and are presented separately
+throughout.
+
+The paper makes the following contributions:
+
+\begin{enumerate}
+  \item A corrected IST-to-UTC timestamp alignment pipeline for Indian CEA
+        generation data, removing a 5.5-hour misalignment present in earlier
+        versions of this work.
+  \item A time-aware, five-fold comparative evaluation of seven scheduling
+        policies across GB and India, using 20 paired workload runs per
+        region-policy combination (Experiment~A).
+  \item A joint analysis of carbon savings, job admission rate, completion
+        rate, material deadline misses, waiting time, and scheduler runtime
+        across all seven policies in both regions.
+  \item Characterisation of the carbon-savings--service-quality trade-off
+        frontier, showing that SRR-APX achieves the highest savings in both
+        regions among policies with zero material misses.
+  \item A separate three-seed forecast-guided investigation~(Experiment~B)
+        reporting a small descriptive improvement from seasonal-naive forecast
+        weighting, with the oracle-guided diagnostic producing identical
+        aggregate outcomes.
+\end{enumerate}
+
+The remainder of this paper is organised as follows. Section~\ref{sec:related}
+reviews related work. Section~\ref{sec:method} describes the methodology.
+Section~\ref{sec:results} presents the results. Section~\ref{sec:discussion}
+discusses the findings. Section~\ref{sec:threats} addresses threats to validity.
+Section~\ref{sec:conclusion} concludes.
+
+%--------------------------------------------------------------
+\section{Related Work}
+\label{sec:related}
+%--------------------------------------------------------------
+
+\subsection{Carbon-Aware Computing and Temporal Shifting}
+
+The principle of aligning computing workloads with cleaner periods of grid
+electricity was operationalised at scale in Google's Carbon-Intelligent
+Computing System~\cite{radovanovic2023}, which uses virtual capacity curves and
+day-ahead carbon forecasts to shift temporally flexible datacenter tasks.
+Wiesner~et~al.~\cite{wiesner2021} provided simulation-based quantification of
+temporal shifting across four European and North American regions, analysing
+the joint influence of deadline slack, scheduling strategy, and forecast error.
+Both works established that available savings are tightly coupled to
+carbon-intensity variability in the target grid.
+
+Hanafy~et~al.~\cite{frachtenberg2023limitations} subsequently analysed
+temporal and spatial workload shifting across 123 grid regions, finding that
+practical savings are limited for many clouds and workloads and that simple
+greedy policies frequently capture most of the available gain. Acun~et~al.\
+\cite{acun2023} proposed Carbon Explorer as a holistic framework for
+carbon-aware datacenter design, modelling both operational and embodied
+components. Together these results temper expectations about large-percentage
+savings from scheduling alone.
+
+\subsection{Deadline-Aware and Service-Quality Constraints}
+
+Hanafy~et~al.~\cite{hanafy2024gaia} introduced GAIA, addressing a three-way
+trade-off among carbon emissions, job completion time, and cloud cost for batch
+workloads. Hanafy~et~al.~\cite{hanafy2024carbonscaler} proposed CarbonScaler,
+exploiting workload elasticity to vary server allocation in response to carbon
+signals while maintaining throughput. Both works measure deadline or
+completion-time overheads alongside carbon savings, a practice this paper
+follows. Lechowicz~et~al.~\cite{lechowicz2023pause} studied the online pause
+and resume problem and applied it to carbon-aware load shifting under
+deadline constraints.
+
+LP-relaxation-based approaches with randomised rounding have a formal basis
+in the scheduling and energy-efficiency literature. Bampis~et~al.\
+\cite{bampis2014energy} proposed a unifying configuration-LP framework with
+randomised rounding for energy-minimisation problems on heterogeneous
+processors. The Bahreini SRR-APX scheduler extends this framework with
+carbon-intensity-dependent objective coefficients~\cite{bahreini2023dispatcher,
+bahreini2022approx}.
+
+\subsection{Geographical and Regional Grid Variation}
+
+Comparative evaluations across national grids are less common than
+within-region studies. Wiesner~et~al.~\cite{wiesner2021} compared four
+regions but focused on temporal shifting under forecast error rather than
+cross-region transferability of a specific scheduler. Souza~et~al.\
+\cite{souza2023casper} introduced CASPER for scheduling across geographically
+distributed cloud regions with different carbon intensities. Hanafy~et~al.\
+\cite{frachtenberg2023limitations} explicitly modelled the role of regional
+carbon variability in limiting achievable savings. Neither of those studies,
+however, evaluates the service-quality behaviour of a specific scheduler across
+a coal-heavy Asian grid and a more variable European grid under a controlled
+temporal validation scheme, nor does either address the IST-to-UTC alignment
+problem that arises when using published Indian electricity authority data.
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=\columnwidth]{paper_diurnal_local_clock.pdf}
+    \caption{Mean diurnal carbon-intensity profiles by source-local clock:
+Great Britain in UTC and India in IST. Both profiles are derived from
+the carbon-intensity traces used in the scheduling evaluation.}
+    \label{fig:carbon-profiles}
+\end{figure}
+
+\subsection{Forecast Methods for Carbon Intensity}
+
+Forecast accuracy affects temporal shifting performance. Radovanovic~et~al.\
+\cite{radovanovic2023} used day-ahead carbon-intensity forecasts in Google's
+operational system. Seasonal-naive forecasting, which repeats the observation
+from the corresponding period in the prior cycle, is a standard low-complexity
+baseline for short-to-medium-range time-series prediction~\cite{makridakis2020m4,
+hyndman2021forecasting}. It is used in Experiment~B as the deployable forecasting
+method, in contrast to the oracle-guided diagnostic, which uses future
+carbon-intensity data and is not operationally deployable.
+
+Cross-validation methodology for time-series data requires care to avoid
+overly optimistic estimates from non-sequential splits. Bergmeir~et~al.\
+\cite{bergmeir2018note} establish conditions under which sequential blocked
+folds provide valid error estimates; this paper uses five sequential temporal
+folds in accordance with that principle.
+
+%--------------------------------------------------------------
+\section{Methodology and Experimental Design}
+\label{sec:method}
+%--------------------------------------------------------------
+
+\subsection{Research Questions and Experimental Structure}
+
+This paper addresses two research questions. The primary question
+(Experiment~A) asks how scheduling effectiveness changes when the same seven
+policies are applied to carbon-intensity patterns from Great Britain and India,
+evaluated jointly across carbon savings, job admission, material deadline
+misses, waiting time, and scheduler runtime. The secondary question
+(Experiment~B) asks whether adding seasonal-naive forecast guidance to the
+Bahreini SRR-APX randomised-rounding procedure changes scheduling outcomes.
+The two experiments use distinct workload generators and evaluation protocols;
+their results are never merged or ranked jointly.
+
+\begin{figure*}[t]
+    \centering    \includegraphics[width=0.6\textwidth]
+    {ecocloud_architecture.pdf}
+    \caption{Overall architecture of the EcoCloud carbon-aware
+    scheduling evaluation. Regional carbon-intensity traces are
+    preprocessed and evaluated across five temporal folds using
+    multiple scheduling policies. A separate forecast-guided
+    experiment compares forecast-based scheduling with an
+    Oracle diagnostic that uses future carbon-intensity data.}
+    \label{fig:architecture}
+\end{figure*}
+
+\subsection{Carbon-Intensity Data Sources and Preprocessing}
+\label{subsec:data}
+
+\subsubsection{Great Britain}
+
+Carbon-intensity data for GB was obtained from the NESO Carbon Intensity
+API~\cite{neso2024api}, which provides half-hourly actual and forecast
+carbon-intensity values in gCO\textsubscript{2}e/kWh at national granularity.
+GB timestamps include explicit UTC offsets, supporting unambiguous temporal
+alignment with the experiment start. Half-hourly observations are aggregated
+to hourly means to match the common timeline.
+
+\subsubsection{India}
+\label{subsubsec:india-data}
+
+Carbon-intensity data for India was derived from generation-mix data published
+by the Central Electricity Authority~(CEA)~\cite{cea2024,ceai2023general} and
+processed to hourly carbon-intensity estimates. The preprocessing pipeline
+performs the following steps:
+
+\begin{enumerate}
+  \item Source CSV timestamps are parsed as IST-localised datetime objects
+        (e.g., \texttt{2026-08-19~00:00:00~Asia/Kolkata}).
+  \item Each timestamp is converted to UTC by subtracting the IST offset of
+        5~hours and 30~minutes, yielding UTC-normalised observations.
+  \item The UTC series is resampled to a uniform hourly grid; missing
+        single-hour gaps are filled by forward-fill and longer gaps are
+        filled by linear interpolation.
+  \item The resulting UTC-aligned series is verified to share the common
+        experiment start (\texttt{2026-08-19T00:00:00Z}) with the GB trace.
+\end{enumerate}
+
+The final India trace contains 690 hourly records, covering
+\texttt{2026-08-19T00:00:00Z} through \texttt{2026-09-16T17:00:00Z}.
+The choice to interpret source timestamps as IST is supported by the physical
+timing of solar generation peaks in the source data; however, authoritative
+source documentation confirming this convention was not available at the time
+of writing. This residual provenance uncertainty is retained as a limitation
+in Section~\ref{sec:threats} and does not invalidate the evaluation but calls
+for confirmation before final publication. India data also uses average
+emissions intensity rather than marginal intensity~\cite{siler2012should};
+this distinction is noted but does not change the experimental design.
+
+\subsection{Experiment Start and Temporal Scope}
+
+Both regional traces use a common experiment start of
+\texttt{2026-08-19T00:00:00Z}~(UTC). The five-fold time-aware evaluation
+partitions the traces into sequential temporal folds following the principles
+of blocked cross-validation for time series~\cite{bergmeir2018note}. The folds
+are evaluation partitions of a single contiguous trace, not five independent
+real-world grid datasets. Reported confidence intervals describe
+fold-to-fold variability under this limited design and should not be
+interpreted as fully independent replications.
+
+\subsection{Workload Configuration}
+\label{subsec:workload}
+
+Experiment~A uses a 60-job workload per run, generated with release slots
+sampled from $[0, 7]$ and additional deadline slack from $[2, 13]$ scheduling
+slots. Four workload seeds are used per fold, giving 20~paired runs per
+region-policy combination across the five folds. Each run uses an identical
+workload seed for both regions, enabling direct comparison of scheduling
+behaviour under matched job demands against different carbon traces. The
+scheduling horizon is 48~slots covering 24~hours.
+
+Experiment~B uses a separate workload generator: release slots are sampled
+from $[0, 13]$ and deadline slack from $[2, 20]$ slots. Three seeds are used:
+20260320, 20260321, and~20260322. The workload parameters differ intentionally
+to explore a wider slack distribution, and the two generators are not directly
+comparable. Experiment~B uses India carbon-intensity data starting at
+simulation hour~432 of the trace (\texttt{2026-09-06T00:00:00Z}).
+
+\subsection{Scheduling Policies}
+
+Seven scheduling policies are evaluated in Experiment~A.
+
+\textit{FCFS~(baseline).} First-come first-served scheduling allocates jobs in
+submission order without reference to carbon intensity. It serves as the
+zero-savings reference for all carbon-savings percentages within each
+experiment. FCFS admits all 60~submitted jobs; its resource-contention-driven
+deadline misses occur because the scheduler makes no attempt to optimise job
+ordering with respect to deadlines.
+
+\textit{Bahreini SRR-APX.} This scheduler uses an LP-relaxation formulation
+for workload-to-resource allocation, where the objective function incorporates
+carbon-intensity-dependent coefficients that favour green-resource utilisation
+\cite{bahreini2023dispatcher,bahreini2022approx}. The LP solution is rounded
+using K-sample Monte Carlo randomised rounding~\cite{bampis2014energy}, and a
+greedy capacity-rejection step removes infeasible allocations. As a consequence
+of this rejection step, SRR-APX does not admit all 60~submitted jobs; its
+carbon savings and completion-rate figures must be interpreted relative to its
+admitted-job count, not the submitted count.
+
+\textit{CADS~(Carbon-Adaptive Deadline-Sensitive), $\theta \in \{0.00, 0.05,
+0.10\}$.} CADS parameterises the balance between carbon minimisation and
+deadline adherence through threshold~$\theta$. Higher values of~$\theta$ place
+more weight on deadline adherence at the cost of smaller carbon savings.
+
+\textit{Deadline-bounded carbon shifting.} This policy shifts workloads to
+lower-carbon windows subject to a deadline feasibility constraint applied more
+permissively than CADS, prioritising carbon savings at the expense of deadline
+compliance.
+
+\textit{Wiesner~2021 Ad-Hoc.} An ad-hoc temporal shifting policy based on the
+approach described in~\cite{wiesner2021}, which defers jobs to lower-intensity
+windows within their deadline slack. It is included to provide a cross-system
+baseline and to characterise its regional sensitivity.
+
+\subsection{Experiment B: Forecast-Guided Variants}
+\label{subsec:forecast}
+
+Experiment~B evaluates four variants of the Bahreini SRR-APX scheduler with
+and without seasonal-naive forecast guidance~\cite{makridakis2020m4,
+hyndman2021forecasting}. The seasonal-naive forecaster repeats the
+carbon-intensity observation from the same hour in the preceding period as
+its forecast for the current hour.
+
+\begin{itemize}
+  \item \textit{Original SRR-APX}: standard Bahreini scheduler with no
+        forecast guidance.
+  \item \textit{Theta~=~0 verification}: forecast-guided SRR-APX with
+        $\theta = 0$, expected to reproduce the original result.
+  \item \textit{Forecast-guided $\theta = 0.5$ and $\theta = 1.0$}: the
+        forecast carbon signal is blended into the allocation objective via
+        Gibbs-style weighting with the specified mixing parameter.
+  \item \textit{Oracle-guided diagnostic}: the scheduler is provided with
+        future carbon-intensity data. This variant is an offline
+        diagnostic reference and is not operationally deployable.
+\end{itemize}
+
+This experiment also includes FCFS and Wiesner~2021 Ad-Hoc as Experiment-B
+baselines. It does not include CADS or the Deadline-bounded shifting policy.
+
+\subsection{Evaluation Metrics}
+
+The following metrics are reported in both experiments:
+
+\begin{itemize}
+  \item \textit{Carbon savings~(\%).} Mean percentage reduction in total
+        carbon emissions~(gCO\textsubscript{2}e) relative to the
+        experiment-specific FCFS baseline.
+  \item \textit{Job admission rate~(\%).} The fraction of the 60~submitted
+        jobs that pass the scheduler's capacity-feasibility check and are
+        admitted for execution. FCFS and all policies except SRR-APX admit
+        all 60~jobs. Admission rate differs from completion rate.
+  \item \textit{Completed jobs.} The number of admitted jobs that reach
+        execution completion within the simulation horizon.
+  \item \textit{Material deadline misses per run.} The mean number of jobs
+        whose completion time exceeds the declared deadline by more than
+        60~seconds. Jobs with lateness below this threshold are counted as
+        any-deadline violations but not material misses.
+  \item \textit{Any-deadline violations per run.} All jobs with any positive
+        lateness, regardless of magnitude.
+  \item \textit{Mean waiting time.} Mean elapsed time from job submission to
+        job start across completed jobs. Reported in minutes for
+        Experiment~A and seconds for Experiment~B.
+  \item \textit{Scheduler runtime~(ms).} Wall-clock duration of the
+        scheduling computation per run.
+\end{itemize}
+
+\subsection{Audit Validation}
+
+An automated numerical audit suite verified a set of implementation-level
+invariants for the simulation pipeline. All tested invariants passed.
+Timestamp alignment was not covered by the original audit suite and is
+addressed separately through the explicit IST-to-UTC conversion pipeline
+described in Section~\ref{subsubsec:india-data}.
+
+%--------------------------------------------------------------
+\section{Results}
+\label{sec:results}
+%--------------------------------------------------------------
+
+\subsection{Cross-Region SRR-APX Comparison}
+
+Table~\ref{tab:crossregion} summarises the Bahreini SRR-APX results for both
+regions under the five-fold time-aware evaluation.
+
+\begin{table}[t]
+\caption{Cross-Region Bahreini SRR-APX Results\\(Five-Fold, 20~Runs per Region)}
+\label{tab:crossregion}
+\centering
+\begin{tabular}{@{}lcc@{}}
+\toprule
+\textbf{Metric} & \textbf{Great Britain} & \textbf{India} \\
+\midrule
+Carbon savings vs.\ FCFS (\%) & 6.04 & 6.16 \\
+95\% CI for savings (\%)      & 2.66--9.41 & 4.93--7.38 \\
+Material deadline misses/run  & 0.00 & 0.00 \\
+Any-deadline violations/run   & 23.05 & 25.20 \\
+Job admission rate (\%)       & 94.67 & 93.42 \\
+Admitted jobs (of 60)         & 56.80 & 56.05 \\
+Completion rate (admitted)    & 100\% & 100\% \\
+Mean waiting time (min)       & 129.58 & 163.74 \\
+Scheduler runtime (ms)        & 94.71 & 115.98 \\
+\bottomrule
+\multicolumn{3}{@{}l@{}}{\footnotesize Material miss threshold: lateness $>60$\,s. Completion rate is} \\
+\multicolumn{3}{@{}l@{}}{\footnotesize relative to admitted jobs, not to all 60 submitted jobs.} \\
+\multicolumn{3}{@{}l@{}}{\footnotesize India timestamp provenance: IST interpretation; see
+  Section~\ref{sec:threats}.}
+\end{tabular}
+\end{table}
+
+The mean carbon savings are 6.04\% in GB and 6.16\% in India, a difference of
+0.12~percentage points with India marginally higher. Both regions return zero
+material deadline misses on average. SRR-APX admits approximately 94.67\% of
+submitted jobs in GB (56.80 of~60) and 93.42\% in India (56.05~of~60); all
+admitted jobs complete. The 95\%~confidence intervals overlap substantially,
+reflecting fold-to-fold variability within a single contiguous trace rather
+than independent replications. The GB interval is notably wider
+(2.66\%--9.41\%) than India's (4.93\%--7.38\%), indicating greater
+fold-to-fold savings variability in the GB trace. Mean waiting time is
+34.16~minutes longer in India, and scheduler runtime is approximately 22\%
+longer.
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=\columnwidth]{gb_india_variability_comparison.png}
+    \caption{Carbon-intensity variability over the evaluation window for
+    Great Britain and India. The comparison reports the standard deviation,
+    the 90th--10th percentile range, and the coefficient of variation of
+    the hourly carbon-intensity traces used in the scheduling evaluation.
+    Table~\ref{tab:crossregion}.}
+    \label{fig:grid-variability}
+\end{figure}
+
+\subsection{Great Britain: Full Policy Comparison}
+
+Table~\ref{tab:gbpolicies} presents the full GB policy comparison. FCFS has
+zero carbon savings by definition and the shortest waiting time~(87.18~min),
+but it produces 9.35 material misses per run due to resource contention.
+SRR-APX achieves the highest mean savings across all GB policies at 6.04\%,
+with zero material misses, at the cost of admitting approximately 94.67\% of
+submitted jobs. CADS configurations achieve 4.32\%--5.49\% savings with
+4.50--5.30 material misses per run; their CADS~$\theta$=0 variant reaches the
+highest savings (5.49\%) among them but also the most material misses (4.85)
+and any-violations (29.15). Deadline-bounded shifting achieves 5.50\% savings
+but incurs 12.20~material misses. Wiesner~2021 Ad-Hoc achieves only 1.11\%
+savings in GB, the lowest among all non-FCFS policies, with 16.15~material
+misses per run.
+
+\begin{table*}[t]
+\caption{Great Britain: All-Policy Comparison (Five-Fold Evaluation, 20~Runs per Policy).\newline
+\footnotesize Savings relative to FCFS. Mat.\,=\,material misses/run (lateness~$>60$\,s).
+Any\,=\,any-deadline violations/run. Wait\,=\,mean waiting time. Adm.\,=\,job admission rate.
+RT\,=\,scheduler runtime. DB-Shift\,=\,Deadline-bounded carbon shifting.}
+\label{tab:gbpolicies}
+\centering
+\footnotesize
+\begin{tabular}{@{}lrrcrrrr@{}}
+\toprule
+\textbf{Policy} & \textbf{Savings (\%)} & \textbf{95\% CI (\%)} & \textbf{Mat.} & \textbf{Any} & \textbf{Wait (min)} & \textbf{Adm. (\%)} & \textbf{RT (ms)} \\
+\midrule
+FCFS                  & 0.00 & 0.00--0.00 &  9.35 & 12.30 &  87.18 & 100.0 &  0.00 \\
+Bahreini SRR-APX      & 6.04 & 2.66--9.41 &  0.00 & 23.05 & 129.58 &  94.7 & 94.71 \\
+CADS $\theta$=0.00    & 5.49 & 1.45--9.53 &  4.85 & 29.15 & 165.81 & 100.0 &  2.01 \\
+CADS $\theta$=0.05    & 4.96 & 1.61--8.31 &  4.50 & 25.25 & 149.17 & 100.0 &  1.44 \\
+CADS $\theta$=0.10    & 4.32 & 1.20--7.44 &  5.30 & 23.80 & 143.84 & 100.0 &  1.28 \\
+DB-Shift              & 5.50 & 0.89--10.10 & 12.20 & 32.70 & 180.17 & 100.0 &  0.90 \\
+Wiesner '21 Ad-Hoc    & 1.11 & 0.00--2.22 & 16.15 & 19.50 & 136.94 & 100.0 &  0.96 \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\subsection{India: Full Policy Comparison}
+
+Table~\ref{tab:indiapolicies} presents the India policy comparison. SRR-APX
+achieves the highest mean savings at 6.16\% with zero material misses,
+consistent with its GB performance. However, the service-quality costs of
+higher-saving policies are substantially more severe in India than in GB.
+Wiesner~2021 Ad-Hoc achieves 5.78\% savings (second-highest in India) but
+incurs 35.30~material misses per run and 280.92~minutes of mean waiting,
+the worst service-quality outcomes of all policies. Deadline-bounded shifting
+achieves 5.27\% savings with 24.80~material misses, also substantially worse
+than in GB~(12.20). CADS configurations in India achieve only 4.28\%--4.61\%
+savings, noticeably lower than the corresponding GB results, and they produce
+15.00--16.30~material misses per run. FCFS again has the shortest waiting time
+(87.18~min) with zero savings and 9.35~material misses.
+
+The contrast with GB is notable: Wiesner~2021 Ad-Hoc achieves only 1.11\%
+savings in GB but 5.78\% in India, a difference of 4.67~percentage points.
+This large region-sensitivity provides direct empirical evidence that cross-region
+evaluation is necessary: a policy's savings are not stable across grids.
+
+\begin{table*}[t]
+\caption{India: All-Policy Comparison (Five-Fold Evaluation, 20~Runs per Policy).\newline
+\footnotesize Savings relative to FCFS. Column definitions match Table~\ref{tab:gbpolicies}.
+India IST-to-UTC timestamp alignment described in Section~\ref{subsubsec:india-data}.}
+\label{tab:indiapolicies}
+\centering
+\footnotesize
+\begin{tabular}{@{}lrrcrrrr@{}}
+\toprule
+\textbf{Policy} & \textbf{Savings (\%)} & \textbf{95\% CI (\%)} & \textbf{Mat.} & \textbf{Any} & \textbf{Wait (min)} & \textbf{Adm. (\%)} & \textbf{RT (ms)} \\
+\midrule
+FCFS                  & 0.00 & 0.00--0.00 &  9.35 & 12.30 &  87.18 & 100.0 &   0.00 \\
+Bahreini SRR-APX      & 6.16 & 4.93--7.38 &  0.00 & 25.20 & 163.74 &  93.4 & 115.98 \\
+CADS $\theta$=0.00    & 4.61 & 3.55--5.67 & 16.30 & 39.15 & 241.05 & 100.0 &   1.51 \\
+CADS $\theta$=0.05    & 4.51 & 3.48--5.53 & 16.00 & 37.40 & 235.83 & 100.0 &   1.10 \\
+CADS $\theta$=0.10    & 4.28 & 3.33--5.23 & 15.00 & 32.75 & 219.82 & 100.0 &   1.12 \\
+DB-Shift              & 5.27 & 4.28--6.26 & 24.80 & 46.90 & 275.47 & 100.0 &   0.79 \\
+Wiesner '21 Ad-Hoc    & 5.78 & 4.83--6.73 & 35.30 & 38.20 & 280.92 & 100.0 &   0.80 \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\subsection{Experiment B: Forecast-Guided Investigation}
+
+Table~\ref{tab:forecast} summarises Experiment~B. This experiment uses a
+different workload generator, a different FCFS baseline, and three seeds; its
+results must not be interpreted as a continuation of Experiment~A.
+
+\begin{table*}[t]
+\caption{Experiment~B: Forecast-Guided SRR-APX Results (India, 3~Seeds, Separate Configuration).\newline
+\footnotesize Savings relative to this experiment's own FCFS baseline. Wait: seconds (not minutes).
+Viol.: deadline violations. Compl.: mean completed jobs (of 60~submitted). RT: scheduler runtime (ms).
+Oracle uses future carbon data and is not deployable. Theta~=~0 verification confirms reproduction
+of the original Bahreini baseline.}
+\label{tab:forecast}
+\centering
+\footnotesize
+\begin{tabular}{@{}lrrrrrrrr@{}}
+\toprule
+\textbf{Variant} &
+  \textbf{Emis. (gCO\textsubscript{2}e)} & \textbf{SD} &
+  \textbf{Sav. (\%)} & \textbf{SD} &
+  \textbf{Wait (s)} & \textbf{Viol.} & \textbf{Compl.} & \textbf{RT (ms)} \\
+\midrule
+FCFS                 & 13{,}981.997 & 545.074 & 0.000 & 0.000 & 2{,}581.09 &  5.0 & 60.00 &   0.00 \\
+Wiesner '21 Ad-Hoc   & 13{,}464.228 & 667.806 & 3.724 & 1.758 & 13{,}172.96 & 19.0 & 60.00 &   0.00 \\
+Original SRR-APX     & 12{,}276.352 & 425.223 & 12.187 & 0.689 & 8{,}822.39 &  7.0 & 56.67 & 205.52 \\
+$\theta$=0 verif.    & 12{,}276.352 & 425.223 & 12.187 & 0.689 & 8{,}822.39 &  7.0 & 56.67 & 161.50 \\
+FG $\theta$=0.5      & 12{,}216.550 & 422.958 & 12.609 & 1.395 & 8{,}790.59 &  6.0 & 56.33 & 151.58 \\
+FG $\theta$=1.0      & 12{,}216.550 & 422.958 & 12.609 & 1.395 & 8{,}790.59 &  6.0 & 56.33 & 168.36 \\
+Oracle $\theta$=1.0  & 12{,}216.550 & 422.958 & 12.609 & 1.395 & 8{,}790.59 &  6.0 & 56.33 & 154.96 \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+The original SRR-APX achieves 12.19\% savings with mean emissions of
+12,276.35~gCO\textsubscript{2}e. The forecast-guided $\theta=0.5$ and
+$\theta=1.0$ variants both produce 12,216.55~gCO\textsubscript{2}e at 12.61\%
+savings, a descriptive improvement of 0.42~percentage points and
+approximately 59.80~gCO\textsubscript{2}e over the original baseline. The
+theta~=~0 verification confirms that the forecast-guided procedure reproduces
+the original result when the forecast weight is zero. Notably, the
+oracle-guided diagnostic produces identical aggregate emissions and savings to
+the forecast-guided variants~(12,216.55~gCO\textsubscript{2}e, 12.61\%). The
+two forecast theta values do not produce distinct aggregate outcomes at the
+reported precision.
+
+The 12.61\% savings in Experiment~B must not be compared directly to the
+6.04\%/6.16\% figures from Experiment~A. The two experiments use different
+workload distributions, deadline slack ranges, seed counts, and evaluation
+protocols.
+
+%--------------------------------------------------------------
+\section{Discussion}
+\label{sec:discussion}
+%--------------------------------------------------------------
+
+\subsection{Cross-Region Transferability}
+
+The 0.12~percentage-point difference in mean SRR-APX savings between GB
+(6.04\%) and India (6.16\%) is small, with India marginally outperforming GB.
+One possible explanation is that SRR-APX responds to relative variations in
+carbon intensity within the scheduling window rather than to absolute intensity
+levels, so a coal-heavy grid with moderate relative diurnal variation can yield
+savings comparable to a more renewable-heavy grid with similar relative
+fluctuation. However, this explanation is speculative without direct analysis
+of the carbon-intensity time series in each fold. The evidence supports only
+the narrower claim that, under the evaluated workload, traces, and experimental
+configuration, the measured mean savings were similar across the two regions.
+
+The significantly different confidence interval widths across regions are
+informative. GB exhibits a much wider fold-to-fold spread (2.66\%--9.41\%) than
+India (4.93\%--7.38\%). This suggests that GB carbon-intensity patterns have
+greater intra-week variability across the trace, causing SRR-APX savings to
+fluctuate more depending on which portion of the trace falls in each fold.
+
+The most striking cross-regional contrast is the Wiesner~2021 Ad-Hoc policy:
+1.11\% savings in GB versus 5.78\% in India, a 4.67~percentage-point gap.
+This policy clearly exploits structural patterns that are stronger in the
+India trace than in the GB trace. Its effectiveness is therefore not portable
+across regions. This finding directly supports the paper's central claim that
+cross-region evaluation is necessary.
+
+\subsection{Service-Quality Trade-offs}
+
+The India policy comparison reveals a pronounced and consistent
+carbon-savings--service-quality trade-off. The policies with the highest
+savings also incur the most material deadline misses and the longest waiting
+times.
+
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=0.8\textwidth]{algorithm_tradeoff_comparison.pdf}
+    \caption{Carbon savings versus mean material deadline misses per run
+    for the seven scheduling policies in Great Britain and India.
+    Each panel uses the five-fold evaluation results. Lower deadline-miss
+    counts and higher carbon savings indicate a more favorable trade-off.}
+    \label{fig:tradeoff}
+\end{figure*}
+
+Wiesner~2021 Ad-Hoc achieves 5.78\% savings in India with 35.30~material misses
+per run. This means that on a typical 60-job run, more than half of all jobs
+experience a material deadline violation. An operator running under any
+reasonable service-level objective~(SLO) would find this unacceptable,
+regardless of the carbon benefit. Deadline-bounded shifting incurs 24.80~misses
+per run at 5.27\% savings: nearly 41\% of jobs miss deadlines materially.
+
+CADS configurations in India achieve lower savings~(4.28\%--4.61\%) and still
+produce 15.00--16.30~material misses per run, suggesting that their
+parameterisation is insufficiently aggressive at preventing misses under India's
+carbon trace. Increasing~$\theta$ from 0.00 to 0.10 reduces waiting time from
+241.05 to 219.82~minutes but leaves material misses largely unchanged
+(16.30~down to 15.00).
+
+Bahreini SRR-APX is the only policy other than FCFS with zero material misses
+in India, and it achieves the highest savings of all seven policies at 6.16\%.
+This combination of best-in-class savings and zero material misses is the key
+service-quality finding of Experiment~A for India. FCFS has the shortest
+waiting time~(87.18~min) but delivers no carbon savings and produces 9.35
+material misses per run from resource-contention effects alone.
+
+In GB the pattern is similar but less extreme. SRR-APX again achieves the
+highest savings~(6.04\%) and zero material misses. All other policies incur
+at least 4.50~material misses. Notably, the CADS range in GB (4.32\%--5.49\%)
+is higher than in India (4.28\%--4.61\%), suggesting that the CADS
+parameterisation is more effective at extracting savings from the GB trace.
+
+\subsection{Admission and Completion Implications}
+
+SRR-APX rejects approximately 3--4 jobs per run due to its greedy
+capacity-rejection step. The 6.04\% and 6.16\% savings figures therefore apply
+to a slightly smaller admitted workload than the 60~submitted jobs seen by all
+other policies. This admission overhead is a genuine trade-off: the rejection
+mechanism is part of why SRR-APX achieves zero material misses. Operators should
+account for the approximately 6\% job rejection rate when dimensioning workload
+pipelines for SRR-APX deployment.
+
+\subsection{Forecast-Guidance Findings}
+
+The forecast-guided variants in Experiment~B yield a descriptive improvement
+of 0.42~percentage points over the original SRR-APX baseline. This
+improvement translates to approximately 59.80~gCO\textsubscript{2}e per run.
+Whether this constitutes a practically significant reduction depends on the
+deployment scale. However, several aspects of the result warrant caution.
+
+First, only three seeds were used. The standard deviations for savings
+(0.689~pp for original SRR-APX, 1.395~pp for forecast-guided variants) are
+large relative to the 0.42~pp descriptive improvement, and no statistical test
+is applied. The improvement is a descriptive observation from a small-sample
+experiment, not an established finding.
+
+Second, the oracle-guided diagnostic produces identical aggregate outcomes to
+both forecast-guided theta values at the reported precision. The oracle uses
+future carbon-intensity information, so its inability to outperform the
+seasonal-naive forecast variants in aggregate emissions suggests either that
+the seasonal-naive forecaster captures most of the exploitable structure in the
+India trace for this workload, or that the improvement is bounded by the
+workload and resource configuration rather than by forecast accuracy. Neither
+explanation is directly established by the available measurements; both are
+plausible.
+
+Third, the theta~=~0.5 and theta~=~1.0 variants produce identical aggregate
+emissions at the reported precision. This suggests the forecast weighting
+saturates before~$\theta = 0.5$, or that the two theta values produce the same
+scheduling decisions under the evaluated conditions.
+
+In summary, Experiment~B yields a small descriptive improvement that merits
+further investigation with more seeds and rigorous statistical evaluation, but
+does not establish robust forecast-guidance benefit.
+
+%--------------------------------------------------------------
+\section{Threats to Validity and Limitations}
+\label{sec:threats}
+%--------------------------------------------------------------
+
+\textit{India timestamp provenance.} The preprocessing pipeline interprets
+source CEA timestamps as IST~(Asia/Kolkata) and converts them to UTC. Physical
+evidence from solar generation peaks in the source data is consistent with the
+IST interpretation, but authoritative source documentation confirming the
+timestamp convention was not available at the time of writing. If the source
+timestamps represent a different convention, the UTC alignment of the India
+trace would be incorrect and would affect all India results. This limitation
+calls for explicit confirmation from CEA data documentation before claims about
+the India trace are treated as publication-ready.
+
+\textit{Limited trace duration and fold count.} The five-fold evaluation
+partitions a single contiguous trace~(approximately 29 days). The folds are
+not independent real-world grid datasets. Confidence intervals reflect
+fold-to-fold variability within one trace and should not be extrapolated to
+general regional behaviour. Longer traces spanning full seasonal cycles would
+provide more reliable characterisation.
+
+\textit{Simulated environment.} The evaluation uses a Java-based scheduling
+simulation rather than a production cloud. Simulated experiments cannot capture
+hardware heterogeneity, network latency, workload inter-arrival variability, or
+the operational overhead of a real scheduler. Reported runtimes and waiting
+times reflect simulator behaviour.
+
+\textit{Average versus marginal emissions.} Both carbon traces use
+average-intensity estimates rather than marginal emissions factors
+\cite{siler2012should}. Average intensity can diverge significantly from
+marginal intensity, particularly in grids with high renewable penetration. The
+savings estimates in this paper are relative to a FCFS baseline computed on
+the same intensity measure, limiting but not eliminating the impact of this
+distinction.
+
+\textit{Limited policy coverage.} The evaluation covers seven policies. Other
+carbon-aware scheduling approaches~\cite{hanafy2024gaia,hanafy2024carbonscaler,
+radovanovic2023} are not included. Results reflect behaviour under the tested
+policy set and workload configuration.
+
+\textit{Workload generalization.} All Experiment~A runs use 60~jobs with a
+fixed release-slot and deadline-slack distribution. Different mixes, job sizes,
+or deadline structures may produce different trade-off surfaces. The two
+workload generators in this study differ in deadline slack, and their results
+are not directly comparable.
+
+\textit{Carbon data imputation.} The India trace uses linear interpolation for
+missing hourly observations. Imputed values introduce uncertainty about
+whether the interpolated intensities accurately represent grid behaviour during
+those periods.
+
+\textit{Forecast experiment sample size.} Experiment~B uses three seeds only.
+The standard deviations are large relative to the observed differences, and no
+null hypothesis test is conducted. The descriptive improvement of
+0.42~percentage points should be treated as exploratory.
+
+\textit{Statistical inference.} The 95\%~confidence intervals reported
+for Experiment~A are descriptive fold-level estimates. No formal null hypothesis
+test comparing the two regions is conducted. The evidence supports descriptive
+observations but not strong inferential claims about regional differences.
+
+%--------------------------------------------------------------
+\section{Conclusion and Future Work}
+\label{sec:conclusion}
+%--------------------------------------------------------------
+
+This paper presented two experimental investigations of carbon-aware cloud
+scheduling. Experiment~A provided a controlled, time-aware comparative
+evaluation of seven scheduling policies across Great Britain and India using a
+five-fold cross-validation scheme, with explicit IST-to-UTC alignment of the
+India carbon-intensity trace. Experiment~B explored the effect of seasonal-naive
+forecast guidance on the Bahreini SRR-APX scheduler using India data and three
+workload seeds.
+
+The central findings are:
+
+\begin{itemize}
+  \item For Bahreini SRR-APX, mean carbon savings were 6.04\% in GB and 6.16\%
+        in India, a difference of 0.12~percentage points with India marginally
+        higher. This similarity does not establish that the scheduler generalises
+        equivalently across all grids or workloads.
+  \item SRR-APX achieves zero material deadline misses in both regions while
+        admitting approximately 93--95\% of submitted jobs. It is the only
+        non-FCFS policy with this property.
+  \item Cross-regional policy sensitivity is significant: Wiesner~2021 Ad-Hoc
+        achieves 1.11\% savings in GB but 5.78\% in India, a 4.67~pp gap.
+        This finding directly confirms that policy effectiveness is not portable
+        across grids and that cross-region evaluation is necessary.
+  \item The India policy comparison shows that higher-saving policies impose
+        severe service-quality costs. Wiesner~2021 Ad-Hoc averages 35.30~material
+        misses per run at 5.78\% savings; Deadline-bounded shifting averages
+        24.80 at 5.27\%. A carbon-saving ranking alone is insufficient to
+        assess scheduling quality.
+  \item Experiment~B yielded a small descriptive improvement of 0.42~pp from
+        forecast guidance over the original SRR-APX baseline. The oracle-guided
+        diagnostic produced identical aggregate outcomes to both forecast
+        theta values, and the three-seed design precludes strong conclusions.
+\end{itemize}
+
+These findings reinforce the principle that carbon-aware schedulers must be
+evaluated jointly across carbon reduction and service quality, and that regional
+performance must be measured rather than assumed from results in other grids.
+
+Future work should: (1)~confirm India CEA timestamp provenance from authoritative
+source documentation and rerun if the IST interpretation proves incorrect;
+(2)~evaluate over longer traces spanning multiple seasons;
+(3)~extend the comparison to additional grids, particularly in South and Southeast
+Asia, sub-Saharan Africa, and Latin America;
+(4)~conduct a rigorous statistical comparison of the forecast-guided variants
+using a larger seed set;
+(5)~investigate the root cause of the saturating oracle behaviour in Experiment~B;
+and (6)~characterise the admission-rejection behaviour of SRR-APX across
+workload distributions with different deadline tightness.
+
+\bibliographystyle{IEEEtran}
+\bibliography{refs}
+
+\end{document}
